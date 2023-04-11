@@ -14,6 +14,8 @@ for file in directory:
 cwd = os.getcwd()
 print("Stephanie-Gold-LUIT")
 
+# List Directory sizes
+
 for name in os.listdir(cwd):
     
     for file_size in range(os.path.getsize(cwd)):
@@ -24,8 +26,10 @@ for name in os.listdir(cwd):
 }
 
 
-    print(file_attr)
-    
+print(file_attr)
+
+# List of Dictionary
+
 l = os.listdir (path)
 print(l)
 
