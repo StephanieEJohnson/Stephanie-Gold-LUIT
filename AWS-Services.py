@@ -22,5 +22,3 @@ print(list_services)
 # Print new AWS Service list with lenght of the list
 print(len(list_services))
 
-
-
