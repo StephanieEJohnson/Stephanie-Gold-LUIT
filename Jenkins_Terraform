@@ -1,0 +1,112 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "5.0.1"
+    }
+
+    #TLS resource 
+    tls = {
+      source  = "hashicorp/tls"
+      version = "4.0.4"
+    }
+  }
+}
+
+# Configure the AWS Provider
+provider "aws" {
+  region = "us-east-1"
+}
+
+# Replace with an AMI instance id and instance type
+resource "aws_instance" "Jenkins_Project" {
+  ami           = "ami-06a0cd9728546d178"
+  instance_type = "t2.micro"
+  tags = {
+  }
+  security_groups             = ["Jenkins-sg"]
+  associate_public_ip_address = true
+  key_name                    = aws_key_pair.generated.key_name
+  connection {
+    user        = "ec2-user"
+    private_key = tls_private_key.generated.private_key_pem
+    host        = self.public_ip
+  }
+  provisioner "local-exec" {
+    command = "chmod 600 ${local_file.private_key_pem.filename}"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo yum update -y",
+      "sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo",
+      "sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key",
+      "sudo yum upgrade -y",
+      "sudo amazon-linux-extras install java-openjdk11 -y",
+      "sudo yum install jenkins -y",
+      "sudo systemctl enable jenkins",
+      "sudo systemctl start jenkins",
+      "sudo systemctl status jenkins"
+    ]
+  }
+}
+
+# Generate Key Pair for EC2 Instance
+resource "tls_private_key" "generated" {
+  algorithm = "RSA"
+}
+resource "local_file" "private_key_pem" {
+  content  = tls_private_key.generated.private_key_pem
+  filename = "Jenkins.pem"
+}
+
+resource "aws_key_pair" "generated" {
+  key_name   = "Jenkins.pem"
+  public_key = tls_private_key.generated.public_key_openssh
+  lifecycle {
+    ignore_changes = [key_name]
+  }
+}
+
+#Create Jenkins sg allow traffic on the following ports
+resource "aws_security_group" "Jenkins-sg" {
+  name        = "Jenkins-sg"
+  description = "Default security group for the default VPC"
+  vpc_id      = "vpc-097385e6c516943c7"
+
+  ingress {
+    description = "Allow Port 8080"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow Port 443"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow Port 22"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Allow all ip and ports outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_s3_bucket" "jenkinsarti" {
+  bucket = "jenksarti"
+}
