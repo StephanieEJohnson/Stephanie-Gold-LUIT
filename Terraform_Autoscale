@@ -1,0 +1,104 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "5.0.1"
+    }
+  }
+}
+
+# AWS provider
+provider "aws" {
+  region = var.aws_region
+}
+
+
+
+# VPC and subnets
+resource "aws_vpc" "Week21Project" {
+  cidr_block = "10.0.0.0/16"
+}
+
+resource "aws_subnet" "subnet1" {
+  vpc_id            = var.vpc_id
+  cidr_block        = "10.0.100.0/24"
+  availability_zone = "us-east-1a"
+}
+
+resource "aws_subnet" "subnet2" {
+  vpc_id            = var.vpc_id
+  cidr_block        = "10.0.102.0/24"
+  availability_zone = "us-east-1b"
+}
+
+# Create security group allowing traffic from the internet
+resource "aws_security_group" "apache_sg" {
+  name        = "apache_sg"
+  description = "Security group for web servers"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow Port 8080"
+    from_port   = 8088
+    to_port     = 8088
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow Port 22"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Allow Port 443"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+}
+
+# Create launch configuration
+resource "aws_launch_configuration" "week21apache" {
+  name            = "week21apache"
+  image_id        = var.ami_id
+  instance_type   = "t2.micro"
+  security_groups = ["sg-000b3a2e42f9eb58c"]
+
+  user_data = <<-EOF
+              #!/bin/bash
+              sudo apt-get update
+              sudo apt-get install -y apache2
+              sudo systemctl enable apache2
+              sudo systemctl start apache2
+              EOF
+}
+
+# Create Auto Scaling Group
+resource "aws_autoscaling_group" "apacheautoscale" {
+  name                 = "apacheautoscale"
+  launch_configuration = aws_launch_configuration.week21apache.name
+  min_size             = 2
+  max_size             = 5
+  desired_capacity     = 2
+  vpc_zone_identifier  = [var.publicsubnet1_id, var.publicsubnet2_id]
+  termination_policies = ["OldestInstance"]
+
+  tag {
+    key                 = "Apache21"
+    value               = "Apache"
+    propagate_at_launch = true
+  }
+}
