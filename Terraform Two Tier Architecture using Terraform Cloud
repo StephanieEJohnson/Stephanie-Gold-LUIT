@@ -1,0 +1,300 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "5.0.1"
+    }
+  }
+}
+
+
+provider "aws" {
+  shared_credentials_files = ["/users/stephanie/.aws/credentials"]
+  region                   = "us-east-1"
+}
+
+terraform {
+  required_version = ">= 1.4.6"
+  cloud {
+    organization = "Stephanie-LUIT"
+
+    workspaces {
+      name = "Project2Tier"
+    }
+  }
+}
+
+# Create VPC
+resource "aws_vpc" "vpc" {
+  cidr_block = "10.0.0.0/16"
+  tags = {
+    Name = "Project2Tier"
+  }
+}
+
+# Create 2 Public Subnets for Web Server Tier
+resource "aws_subnet" "web_public_subnet_1" {
+  vpc_id                  = var.vpc_id
+  cidr_block              = "10.0.6.0/24"
+  availability_zone       = "us-east-1a"
+  map_public_ip_on_launch = true
+  tags = {
+    Name = "Web_public_subnet_1"
+  }
+}
+
+resource "aws_subnet" "web_public_subnet_2" {
+  vpc_id                  = var.vpc_id
+  cidr_block              = "10.0.7.0/24"
+  availability_zone       = "us-east-1b"
+  map_public_ip_on_launch = true
+  tags = {
+    Name = "Web_public_subnet_2"
+  }
+}
+
+# Create 2 Private Subnets for RDS Tier
+resource "aws_subnet" "rds_private_subnet_1" {
+  vpc_id            = var.vpc_id
+  cidr_block        = "10.0.4.0/24"
+  availability_zone = "us-east-1a"
+  tags = {
+    Name = "RDS_private_subnet_1"
+  }
+}
+
+resource "aws_subnet" "rds_private_subnet_2" {
+  vpc_id            = var.vpc_id
+  cidr_block        = "10.0.5.0/24"
+  availability_zone = "us-east-1b"
+  tags = {
+    Name = "RDS_private_subnet_2"
+  }
+}
+
+# Create NAT Gateway
+resource "aws_eip" "nat_eip" {
+  domain = "vpc"
+  tags = {
+    Name = "NAT Gateway"
+  }
+}
+
+resource "aws_nat_gateway" "nat_gateway" {
+  allocation_id = aws_eip.nat_eip.id
+  subnet_id     = aws_subnet.web_public_subnet_1.id
+  tags = {
+    Name = "NAT Gateway"
+  }
+}
+# Configure Route Table
+resource "aws_route_table" "route_table_public1" {
+  vpc_id = var.vpc_id
+
+  tags = {
+    Name = "route_table_public1"
+  }
+}
+resource "aws_route_table" "route_table_public2" {
+  vpc_id = var.vpc_id
+
+  tags = {
+    Name = "route_table_public2"
+  }
+}
+resource "aws_route_table" "route_table_private1" {
+  vpc_id = var.vpc_id
+
+  tags = {
+    Name = "route_table_private1"
+  }
+}
+resource "aws_route_table" "route_table_private2" {
+  vpc_id = var.vpc_id
+
+  tags = {
+    Name = "route_table_private2"
+  }
+}
+
+# Create a route to the internet gateway
+resource "aws_internet_gateway" "Project2Tierigw" {
+  vpc_id = var.vpc_id
+  tags = {
+    Name = "Project2Tierigw"
+  }
+}
+
+resource "aws_route_table_association" "public_subnet_1" {
+  subnet_id      = aws_subnet.web_public_subnet_1.id
+  route_table_id = aws_route_table.route_table_public1.id
+}
+
+resource "aws_route_table_association" "public_subnet_2" {
+  subnet_id      = aws_subnet.web_public_subnet_2.id
+  route_table_id = aws_route_table.route_table_public2.id
+}
+
+# Create a route to the NAT gateway
+resource "aws_route" "private_route1" {
+  route_table_id         = aws_route_table.route_table_public1.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.nat_gateway.id
+}
+
+resource "aws_route" "private_route2" {
+  route_table_id         = aws_route_table.route_table_public2.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.nat_gateway.id
+}
+
+resource "aws_route_table_association" "private_subnet_1" {
+  subnet_id      = aws_subnet.rds_private_subnet_1.id
+  route_table_id = aws_route_table.route_table_public1.id
+}
+
+resource "aws_route_table_association" "private_subnet_2" {
+  subnet_id      = aws_subnet.rds_private_subnet_2.id
+  route_table_id = aws_route_table.route_table_public2.id
+}
+
+# Add Load Balancer
+resource "aws_lb" "web_lb" {
+  name               = "myweb-lb"
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.webserversg.id]
+  subnets            = [aws_subnet.web_public_subnet_1.id, aws_subnet.web_public_subnet_2.id]
+
+  tags = {
+    Name = "myweb-lb"
+  }
+}
+# Create EC2 instances for the web server tier
+resource "aws_instance" "webserver_1" {
+  ami                         = "ami-04a0ae173da5807d3"
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.web_public_subnet_1.id
+  vpc_security_group_ids      = [aws_security_group.webserversg.id]
+  associate_public_ip_address = true
+  key_name                    = "Stephanie_new_key"
+  tags = {
+    Name = "webserver_1"
+  }
+
+  user_data = <<-EOF
+    #!/bin/bash
+    yum update -y
+    yum install httpd -y
+    systemctl start httpd
+    systemctl enable httpd 
+    echo "<html><body><h1> Hello this is Webserver1 
+     </h1></body></html>" > /var/www/html/index.html
+    EOF
+}
+resource "aws_instance" "webserver_2" {
+  ami                         = "ami-04a0ae173da5807d3"
+  instance_type               = "t2.micro"
+  subnet_id                   = aws_subnet.web_public_subnet_2.id
+  vpc_security_group_ids      = [aws_security_group.webserversg.id]
+  associate_public_ip_address = true
+  key_name                    = "Stephanie_new_key"
+  tags = {
+    Name = "webserver_2"
+  }
+
+  user_data = <<-EOF
+    #!/bin/bash
+    yum update -y
+    yum install httpd -y
+    systemctl start httpd
+    systemctl enable httpd 
+    echo "<html><body><h1> Hello this is Webserver2 
+     </h1></body></html>" > /var/www/html/index.html
+    EOF
+}
+
+# Create a security group for the web servers
+resource "aws_security_group" "webserversg" {
+  name        = "webserversg"
+  description = "Security group for web servers"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "webserversg"
+  }
+}
+
+# Create security group for RDS
+resource "aws_security_group" "rds_sg" {
+  name        = "rds_sg"
+  description = "Security group for RDS"
+  vpc_id      = var.vpc_id
+
+  ingress {
+    from_port   = 3306
+    to_port     = 3306
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "rds_sg"
+  }
+}
+
+# Create RDS instance
+resource "aws_db_instance" "rdsinstance" {
+  engine                    = "mysql"
+  instance_class            = "db.t2.micro"
+  allocated_storage         = 20
+  storage_type              = "gp2"
+  publicly_accessible       = false
+  identifier                = "rdsinstance"
+  username                  = "rds22"
+  password                  = "rdspassword123"
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "my-final-snapshot1"
+  tags = {
+    Name = "rdsinstance"
+  }
+}
