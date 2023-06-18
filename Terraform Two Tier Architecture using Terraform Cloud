@@ -13,6 +13,16 @@ provider "aws" {
   region                   = "us-east-1"
 }
 
+resource "tls_private_key" "myapache_keypair" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "aws_key_pair" "myapache_keypair" {
+  key_name   = "myapache-keypair"
+  public_key = tls_private_key.myapache_keypair.public_key_openssh
+}
+
 terraform {
   required_version = ">= 1.4.6"
   cloud {
@@ -87,36 +97,6 @@ resource "aws_nat_gateway" "nat_gateway" {
     Name = "NAT Gateway"
   }
 }
-# Configure Route Table
-resource "aws_route_table" "route_table_public1" {
-  vpc_id = var.vpc_id
-
-  tags = {
-    Name = "route_table_public1"
-  }
-}
-resource "aws_route_table" "route_table_public2" {
-  vpc_id = var.vpc_id
-
-  tags = {
-    Name = "route_table_public2"
-  }
-}
-resource "aws_route_table" "route_table_private1" {
-  vpc_id = var.vpc_id
-
-  tags = {
-    Name = "route_table_private1"
-  }
-}
-resource "aws_route_table" "route_table_private2" {
-  vpc_id = var.vpc_id
-
-  tags = {
-    Name = "route_table_private2"
-  }
-}
-
 # Create a route to the internet gateway
 resource "aws_internet_gateway" "Project2Tierigw" {
   vpc_id = var.vpc_id
@@ -133,6 +113,47 @@ resource "aws_route_table_association" "public_subnet_1" {
 resource "aws_route_table_association" "public_subnet_2" {
   subnet_id      = aws_subnet.web_public_subnet_2.id
   route_table_id = aws_route_table.route_table_public2.id
+}
+
+# Configure Route Table
+resource "aws_route_table" "route_table_public1" {
+  vpc_id = var.vpc_id
+
+  tags = {
+    Name = "route_table_public1"
+  }
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.Project2Tierigw.id
+  }
+
+}
+resource "aws_route_table" "route_table_public2" {
+  vpc_id = var.vpc_id
+
+  tags = {
+    Name = "route_table_public2"
+  }
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.Project2Tierigw.id
+  }
+
+}
+resource "aws_route_table" "route_table_private1" {
+  vpc_id = var.vpc_id
+
+  tags = {
+    Name = "route_table_private1"
+  }
+}
+resource "aws_route_table" "route_table_private2" {
+  vpc_id = var.vpc_id
+
+  tags = {
+    Name = "route_table_private2"
+  }
 }
 
 # Create a route to the NAT gateway
@@ -169,6 +190,35 @@ resource "aws_lb" "web_lb" {
     Name = "myweb-lb"
   }
 }
+# Add Listener to Load Balancer
+resource "aws_lb_listener" "web_lb_listener" {
+  load_balancer_arn = aws_lb.web_lb.arn
+  port              = 8080
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.web_target_group.arn
+  }
+}
+
+# Add Target Group for Load Balancer
+resource "aws_lb_target_group" "web_target_group" {
+  name        = 8080
+  port        = 8080
+  protocol    = "HTTP"
+  target_type = "instance"
+  vpc_id      = var.vpc_id
+
+  health_check {
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 3
+    interval            = 30
+    path                = "/"
+  }
+}
+
 # Create EC2 instances for the web server tier
 resource "aws_instance" "webserver_1" {
   ami                         = "ami-04a0ae173da5807d3"
@@ -176,7 +226,7 @@ resource "aws_instance" "webserver_1" {
   subnet_id                   = aws_subnet.web_public_subnet_1.id
   vpc_security_group_ids      = [aws_security_group.webserversg.id]
   associate_public_ip_address = true
-  key_name                    = "Stephanie_new_key"
+  key_name                    = aws_key_pair.myapache_keypair.key_name
   tags = {
     Name = "webserver_1"
   }
@@ -187,8 +237,7 @@ resource "aws_instance" "webserver_1" {
     yum install httpd -y
     systemctl start httpd
     systemctl enable httpd 
-    echo "<html><body><h1> Hello this is Webserver1 
-     </h1></body></html>" > /var/www/html/index.html
+  
     EOF
 }
 resource "aws_instance" "webserver_2" {
@@ -197,7 +246,7 @@ resource "aws_instance" "webserver_2" {
   subnet_id                   = aws_subnet.web_public_subnet_2.id
   vpc_security_group_ids      = [aws_security_group.webserversg.id]
   associate_public_ip_address = true
-  key_name                    = "Stephanie_new_key"
+  key_name                    = aws_key_pair.myapache_keypair.key_name
   tags = {
     Name = "webserver_2"
   }
@@ -208,8 +257,7 @@ resource "aws_instance" "webserver_2" {
     yum install httpd -y
     systemctl start httpd
     systemctl enable httpd 
-    echo "<html><body><h1> Hello this is Webserver2 
-     </h1></body></html>" > /var/www/html/index.html
+    
     EOF
 }
 
@@ -220,8 +268,17 @@ resource "aws_security_group" "webserversg" {
   vpc_id      = var.vpc_id
 
   ingress {
+    description = "HTTP"
     from_port   = 8080
     to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "HTTP"
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
